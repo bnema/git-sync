@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -47,8 +48,21 @@ func installDaemon() error {
 	// Check if already installed
 	if isInstalled, err := systemd.GetServiceStatus(); err == nil && isInstalled {
 		fmt.Println("⚠️  Git sync daemon is already installed and running.")
-		fmt.Println("Use --uninstall to remove it first, or restart the service manually.")
-		return nil
+		fmt.Print("Do you want to overwrite the existing installation? (y/N): ")
+		
+		var response string
+		fmt.Scanln(&response)
+		
+		if strings.ToLower(response) != "y" && strings.ToLower(response) != "yes" {
+			fmt.Println("Installation cancelled.")
+			return nil
+		}
+		
+		// Uninstall existing service before proceeding
+		fmt.Println("Uninstalling existing daemon...")
+		if err := systemd.UninstallUserService(); err != nil {
+			return fmt.Errorf("failed to uninstall existing service: %w", err)
+		}
 	}
 
 	// Get the path to the current executable

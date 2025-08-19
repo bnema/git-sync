@@ -38,5 +38,6 @@ func init() {
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(installDaemonCmd)
+	rootCmd.AddCommand(historyCmd)
 }
 
