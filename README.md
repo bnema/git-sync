@@ -33,8 +33,8 @@ go install github.com/bnema/git-sync@latest
 
 ```bash
 cd /path/to/your/repo
-git sync init                    # Use defaults (push, 300s interval)
-git sync init -d both -i 600     # Both directions, 10min interval
+git sync init                    # Interactive setup with guided prompts
+git sync init -d both -i 600     # Non-interactive: both directions, 10min interval
 git sync init --branch-strategy specific --target-branch develop
 ```
 
@@ -124,7 +124,8 @@ git sync init --branch-strategy specific --target-branch develop -d both
 Initialize current repository for sync daemon.
 
 ```bash
-git sync init [flags]
+git sync init                 # Interactive setup with prompts
+git sync init [flags]         # Non-interactive with flags
 
 Flags:
   --branch-strategy string   Branch strategy: current, main, all, specific (default "current")
@@ -167,10 +168,11 @@ Flags:
 ### Multiple Repository Setup
 
 ```bash
-# Setup different repos with different strategies
-cd ~/projects/webapp
-git sync init -d push --branch-strategy main
+# Interactive setup for first repository  
+cd ~/projects/webapp  
+git sync init                            # Interactive prompts
 
+# Non-interactive setup for additional repositories
 cd ~/projects/api
 git sync init -d both --branch-strategy specific --target-branch develop
 
