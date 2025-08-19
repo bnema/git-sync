@@ -109,8 +109,17 @@ func SaveConfig(config *Config, configPath string) error {
 	v.SetConfigFile(configPath)
 	v.SetConfigType("toml")
 	
-	// Set the config values
-	v.Set("global", config.Global)
+	// Read existing config first if it exists
+	if _, err := os.Stat(configPath); err == nil {
+		if err := v.ReadInConfig(); err != nil {
+			return fmt.Errorf("failed to read existing config: %w", err)
+		}
+	}
+	
+	// Merge config values intelligently - only set non-zero values
+	mergeGlobalConfig(v, config.Global)
+	
+	// Always set repositories array (this is expected to be complete)
 	v.Set("repositories", config.Repositories)
 
 	if err := v.WriteConfig(); err != nil {
@@ -118,6 +127,31 @@ func SaveConfig(config *Config, configPath string) error {
 	}
 
 	return nil
+}
+
+// mergeGlobalConfig merges non-zero global config values into viper
+func mergeGlobalConfig(v *viper.Viper, global GlobalConfig) {
+	if global.LogLevel != "" {
+		v.Set("global.log_level", global.LogLevel)
+	}
+	if global.DefaultInterval > 0 {
+		v.Set("global.default_interval", global.DefaultInterval)
+	}
+	if global.MaxConcurrentSyncs > 0 {
+		v.Set("global.max_concurrent_syncs", global.MaxConcurrentSyncs)
+	}
+	if global.HistoryMaxEntries > 0 {
+		v.Set("global.history_max_entries", global.HistoryMaxEntries)
+	}
+	if global.HistoryRetentionDays > 0 {
+		v.Set("global.history_retention_days", global.HistoryRetentionDays)
+	}
+	if global.HistoryCacheDir != "" {
+		v.Set("global.history_cache_dir", global.HistoryCacheDir)
+	}
+	if global.HistoryMaxFileSizeMB > 0 {
+		v.Set("global.history_max_file_size_mb", global.HistoryMaxFileSizeMB)
+	}
 }
 
 func AddRepository(repoConfig RepoConfig, configPath string) error {
