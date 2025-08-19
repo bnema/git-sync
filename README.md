@@ -148,6 +148,27 @@ Flags:
   --daemon   Show daemon status
 ```
 
+### `git sync edit`
+Open the configuration file in your default editor.
+
+```bash
+git sync edit
+```
+
+Uses the `EDITOR` environment variable to determine which editor to use. Creates a default configuration file if none exists.
+
+### `git sync history`
+Show synchronization history for repositories.
+
+```bash
+git sync history [flags]
+
+Flags:
+  --all         Show history for all repositories
+  --limit int   Limit number of entries (default 20)
+  --repo string Specific repository path to show history for
+```
+
 ### `git sync daemon`
 Run the sync daemon (usually via systemd).
 
