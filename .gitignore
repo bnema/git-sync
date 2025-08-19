@@ -1,6 +1,9 @@
 # Local documentation
 docs.local/
 
+# Serena MCP cache and configuration
+.serena/
+
 # Binaries for programs and plugins
 *.exe
 *.exe~
