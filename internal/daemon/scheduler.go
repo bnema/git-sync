@@ -10,18 +10,20 @@ import (
 )
 
 type Scheduler struct {
-	timers  map[string]*time.Timer
-	tickers map[string]*time.Ticker
-	mutex   sync.RWMutex
-	logger  *slog.Logger
-	wg      sync.WaitGroup
+	timers         map[string]*time.Timer
+	tickers        map[string]*time.Ticker
+	mutex          sync.RWMutex
+	logger         *slog.Logger
+	wg             sync.WaitGroup
+	historyManager *HistoryManager
 }
 
-func NewScheduler(logger *slog.Logger) *Scheduler {
+func NewScheduler(logger *slog.Logger, historyManager *HistoryManager) *Scheduler {
 	return &Scheduler{
-		timers:  make(map[string]*time.Timer),
-		tickers: make(map[string]*time.Ticker),
-		logger:  logger,
+		timers:         make(map[string]*time.Timer),
+		tickers:        make(map[string]*time.Ticker),
+		logger:         logger,
+		historyManager: historyManager,
 	}
 }
 
@@ -117,6 +119,17 @@ func (s *Scheduler) performSync(repo config.RepoConfig, sm *SyncManager) {
 	start := time.Now()
 	err := sm.SyncRepository(repo)
 	duration := time.Since(start)
+
+	// Record in history if history manager is available
+	if s.historyManager != nil {
+		status := "success"
+		errorMsg := ""
+		if err != nil {
+			status = "failed"
+			errorMsg = err.Error()
+		}
+		s.historyManager.RecordSync(repo.Path, repo.Direction, status, duration, errorMsg)
+	}
 
 	if err != nil {
 		s.logger.Error("Sync failed", 
