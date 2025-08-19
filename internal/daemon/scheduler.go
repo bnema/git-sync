@@ -16,6 +16,7 @@ type Scheduler struct {
 	logger         *slog.Logger
 	wg             sync.WaitGroup
 	historyManager *HistoryManager
+	ctx            context.Context
 }
 
 func NewScheduler(logger *slog.Logger, historyManager *HistoryManager) *Scheduler {
@@ -31,6 +32,7 @@ func (s *Scheduler) Start(ctx context.Context, repos []config.RepoConfig, sm *Sy
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
+	s.ctx = ctx
 	s.logger.Info("Starting scheduler", "repositories", len(repos))
 
 	for _, repo := range repos {
@@ -61,8 +63,23 @@ func (s *Scheduler) Stop() {
 		delete(s.tickers, path)
 	}
 
-	// Wait for all goroutines to finish
-	s.wg.Wait()
+	// Wait for all goroutines to finish with timeout
+	done := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+
+	// Create a timeout context for graceful shutdown
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	select {
+	case <-done:
+		s.logger.Info("All scheduler goroutines stopped gracefully")
+	case <-shutdownCtx.Done():
+		s.logger.Warn("Scheduler shutdown timed out, some goroutines may still be running")
+	}
 
 	s.logger.Info("Scheduler stopped")
 }

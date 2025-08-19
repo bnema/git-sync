@@ -233,6 +233,9 @@ func (d *Daemon) shutdown() error {
 	// Cancel context to stop all operations
 	d.cancel()
 
+	// Give goroutines a moment to process the context cancellation
+	time.Sleep(100 * time.Millisecond)
+
 	// Stop scheduler
 	d.scheduler.Stop()
 
