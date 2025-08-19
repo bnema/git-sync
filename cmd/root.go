@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"github.com/bnema/cobra-autocomp"
 	"github.com/spf13/cobra"
 )
 
@@ -39,5 +40,8 @@ func init() {
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(installDaemonCmd)
 	rootCmd.AddCommand(historyCmd)
+	
+	// Add enhanced completion command
+	autocomp.AddCompletionCommand(rootCmd)
 }
 

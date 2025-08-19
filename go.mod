@@ -3,6 +3,7 @@ module github.com/bnema/git-sync
 go 1.24.6
 
 require (
+	github.com/bnema/cobra-autocomp v0.1.0
 	github.com/coreos/go-systemd/v22 v22.5.0
 	github.com/fsnotify/fsnotify v1.8.0
 	github.com/go-git/go-git/v5 v5.16.2
