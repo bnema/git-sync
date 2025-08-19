@@ -23,7 +23,7 @@ Examples:
   git sync history                 # Show synchronization history
   git sync daemon                  # Run daemon (usually via systemd)
   git sync install-daemon          # Install systemd service`,
-	Version: "1.0.0",
+	Version: "0.2.0",
 }
 
 func Execute() error {
