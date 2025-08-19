@@ -2,10 +2,14 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
+	"time"
 
-	"github.com/BurntSushi/toml"
+	"github.com/fsnotify/fsnotify"
+	"github.com/spf13/viper"
 )
 
 type Config struct {
@@ -17,6 +21,12 @@ type GlobalConfig struct {
 	LogLevel           string `toml:"log_level"`
 	DefaultInterval    int    `toml:"default_interval"`
 	MaxConcurrentSyncs int    `toml:"max_concurrent_syncs"`
+	
+	// History configuration
+	HistoryMaxEntries    int    `toml:"history_max_entries"`
+	HistoryRetentionDays int    `toml:"history_retention_days"`
+	HistoryCacheDir      string `toml:"history_cache_dir"`
+	HistoryMaxFileSizeMB int    `toml:"history_max_file_size_mb"`
 }
 
 type RepoConfig struct {
@@ -31,7 +41,21 @@ type RepoConfig struct {
 	ForcePush      bool   `toml:"force_push"`
 }
 
+// ConfigWatcher handles live configuration file watching
+type ConfigWatcher struct {
+	viper         *viper.Viper
+	configPath    string
+	onChange      func(*Config) error
+	logger        *slog.Logger
+	currentConfig *Config
+	mu            sync.RWMutex
+	lastChange    time.Time
+	debounceDelay time.Duration
+}
+
 func LoadConfig(configPath string) (*Config, error) {
+	v := viper.New()
+	
 	if configPath == "" {
 		var err error
 		configPath, err = getDefaultConfigPath()
@@ -47,26 +71,30 @@ func LoadConfig(configPath string) (*Config, error) {
 		}
 	}
 
-	var config Config
-	if _, err := toml.DecodeFile(configPath, &config); err != nil {
-		return nil, fmt.Errorf("failed to decode config file: %w", err)
+	// Configure Viper
+	v.SetConfigFile(configPath)
+	v.SetConfigType("toml")
+	
+	// Set defaults
+	v.SetDefault("global.log_level", "info")
+	v.SetDefault("global.default_interval", 300)
+	v.SetDefault("global.max_concurrent_syncs", 5)
+
+	if err := v.ReadInConfig(); err != nil {
+		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
-	// Set defaults if not specified
-	if config.Global.LogLevel == "" {
-		config.Global.LogLevel = "info"
-	}
-	if config.Global.DefaultInterval == 0 {
-		config.Global.DefaultInterval = 300
-	}
-	if config.Global.MaxConcurrentSyncs == 0 {
-		config.Global.MaxConcurrentSyncs = 5
+	var config Config
+	if err := v.Unmarshal(&config); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 
 	return &config, nil
 }
 
 func SaveConfig(config *Config, configPath string) error {
+	v := viper.New()
+	
 	if configPath == "" {
 		var err error
 		configPath, err = getDefaultConfigPath()
@@ -81,19 +109,16 @@ func SaveConfig(config *Config, configPath string) error {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	file, err := os.Create(configPath)
-	if err != nil {
-		return fmt.Errorf("failed to create config file: %w", err)
-	}
-	defer func() { 
-		if err := file.Close(); err != nil {
-			fmt.Printf("Warning: failed to close config file: %v\n", err)
-		}
-	}()
+	// Configure Viper for writing
+	v.SetConfigFile(configPath)
+	v.SetConfigType("toml")
+	
+	// Set the config values
+	v.Set("global", config.Global)
+	v.Set("repositories", config.Repositories)
 
-	encoder := toml.NewEncoder(file)
-	if err := encoder.Encode(config); err != nil {
-		return fmt.Errorf("failed to encode config: %w", err)
+	if err := v.WriteConfig(); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
 	}
 
 	return nil
@@ -133,9 +158,141 @@ func createDefaultConfig(configPath string) error {
 			LogLevel:           "info",
 			DefaultInterval:    300,
 			MaxConcurrentSyncs: 5,
+			
+			// History defaults
+			HistoryMaxEntries:    1000,
+			HistoryRetentionDays: 30,
+			HistoryCacheDir:      "", // Will use default ~/.cache/git-sync
+			HistoryMaxFileSizeMB: 10,
 		},
 		Repositories: []RepoConfig{},
 	}
 
 	return SaveConfig(defaultConfig, configPath)
+}
+
+// NewConfigWatcher creates a new ConfigWatcher instance
+func NewConfigWatcher(configPath string, onChange func(*Config) error, logger *slog.Logger) (*ConfigWatcher, error) {
+	if configPath == "" {
+		var err error
+		configPath, err = getDefaultConfigPath()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get default config path: %w", err)
+		}
+	}
+
+	// Load initial config
+	initialConfig, err := LoadConfig(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load initial config: %w", err)
+	}
+
+	v := viper.New()
+	v.SetConfigFile(configPath)
+	v.SetConfigType("toml")
+	
+	// Set defaults
+	v.SetDefault("global.log_level", "info")
+	v.SetDefault("global.default_interval", 300)
+	v.SetDefault("global.max_concurrent_syncs", 5)
+
+	if err := v.ReadInConfig(); err != nil {
+		return nil, fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	cw := &ConfigWatcher{
+		viper:         v,
+		configPath:    configPath,
+		onChange:      onChange,
+		logger:        logger,
+		currentConfig: initialConfig,
+		debounceDelay: 500 * time.Millisecond,
+	}
+
+	return cw, nil
+}
+
+// StartWatching begins watching the config file for changes
+func (cw *ConfigWatcher) StartWatching() error {
+	cw.viper.OnConfigChange(func(e fsnotify.Event) {
+		cw.mu.Lock()
+		defer cw.mu.Unlock()
+		
+		// Debounce rapid file changes
+		now := time.Now()
+		if now.Sub(cw.lastChange) < cw.debounceDelay {
+			return
+		}
+		cw.lastChange = now
+		
+		cw.logger.Info("Config file changed, reloading", "file", e.Name)
+		
+		// Reload config
+		var newConfig Config
+		if err := cw.viper.Unmarshal(&newConfig); err != nil {
+			cw.logger.Error("Failed to unmarshal updated config", "error", err)
+			return
+		}
+		
+		// Validate config
+		if err := cw.validateConfig(&newConfig); err != nil {
+			cw.logger.Error("Invalid config detected, ignoring changes", "error", err)
+			return
+		}
+		
+		// Update current config
+		cw.currentConfig = &newConfig
+		
+		// Call the onChange callback
+		if cw.onChange != nil {
+			if err := cw.onChange(&newConfig); err != nil {
+				cw.logger.Error("Failed to apply config changes", "error", err)
+				return
+			}
+		}
+		
+		cw.logger.Info("Config reloaded successfully")
+	})
+	
+	cw.viper.WatchConfig()
+	cw.logger.Info("Started watching config file", "path", cw.configPath)
+	return nil
+}
+
+// StopWatching stops watching the config file
+func (cw *ConfigWatcher) StopWatching() {
+	// Viper doesn't provide a direct way to stop watching, so we clear the callback
+	cw.viper.OnConfigChange(func(e fsnotify.Event) {})
+	cw.logger.Info("Stopped watching config file")
+}
+
+// GetCurrentConfig returns the current configuration (thread-safe)
+func (cw *ConfigWatcher) GetCurrentConfig() *Config {
+	cw.mu.RLock()
+	defer cw.mu.RUnlock()
+	return cw.currentConfig
+}
+
+// validateConfig performs basic validation on the configuration
+func (cw *ConfigWatcher) validateConfig(config *Config) error {
+	if config.Global.DefaultInterval <= 0 {
+		return fmt.Errorf("default_interval must be positive")
+	}
+	if config.Global.MaxConcurrentSyncs <= 0 {
+		return fmt.Errorf("max_concurrent_syncs must be positive")
+	}
+	
+	for i, repo := range config.Repositories {
+		if repo.Path == "" {
+			return fmt.Errorf("repository %d: path cannot be empty", i)
+		}
+		if repo.Interval < 0 {
+			return fmt.Errorf("repository %d: interval cannot be negative", i)
+		}
+		if repo.Direction != "push" && repo.Direction != "pull" && repo.Direction != "sync" {
+			return fmt.Errorf("repository %d: direction must be 'push', 'pull', or 'sync'", i)
+		}
+	}
+	
+	return nil
 }
