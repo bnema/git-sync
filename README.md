@@ -236,7 +236,6 @@ git-sync/
 │   │   ├── sync.go          # Sync management
 │   │   └── scheduler.go     # Timing and scheduling
 │   └── systemd/             # Systemd integration
-└── docs.local/PLAN.md       # Detailed implementation plan
 ```
 
 ## Troubleshooting
