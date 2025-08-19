@@ -13,18 +13,20 @@ import (
 	"github.com/coreos/go-systemd/v22/daemon"
 
 	"github.com/bnema/git-sync/internal/config"
+	"github.com/bnema/git-sync/internal/notification"
 )
 
 type Daemon struct {
-	config         *config.Config
-	configWatcher  *config.ConfigWatcher
-	syncManager    *SyncManager
-	scheduler      *Scheduler
-	historyManager *HistoryManager
-	logger         *slog.Logger
-	ctx            context.Context
-	cancel         context.CancelFunc
-	mu             sync.RWMutex
+	config              *config.Config
+	configWatcher       *config.ConfigWatcher
+	syncManager         *SyncManager
+	scheduler           *Scheduler
+	historyManager      *HistoryManager
+	notificationManager *notification.NotificationManager
+	logger              *slog.Logger
+	ctx                 context.Context
+	cancel              context.CancelFunc
+	mu                  sync.RWMutex
 }
 
 func NewDaemon(configPath string) (*Daemon, error) {
@@ -63,15 +65,23 @@ func NewDaemon(configPath string) (*Daemon, error) {
 		historyManager = nil
 	}
 
+	// Create notification manager
+	notificationManager := notification.NewNotificationManager(
+		cfg.Global.EnableNotifications,
+		cfg.Global.NotificationTimeout,
+		logger,
+	)
+
 	// Create daemon instance
 	d := &Daemon{
-		config:         cfg,
-		syncManager:    NewSyncManager(cfg.Global.MaxConcurrentSyncs, logger),
-		scheduler:      NewScheduler(logger, historyManager),
-		historyManager: historyManager,
-		logger:         logger,
-		ctx:            ctx,
-		cancel:         cancel,
+		config:              cfg,
+		syncManager:         NewSyncManager(cfg.Global.MaxConcurrentSyncs, logger),
+		scheduler:           NewScheduler(logger, historyManager, notificationManager),
+		historyManager:      historyManager,
+		notificationManager: notificationManager,
+		logger:              logger,
+		ctx:                 ctx,
+		cancel:              cancel,
 	}
 
 	// Create config watcher with callback to daemon's reload method
@@ -189,7 +199,15 @@ func (d *Daemon) reloadConfig(newConfig *config.Config) error {
 	// Update config and restart scheduler
 	d.config = newConfig
 	d.syncManager = NewSyncManager(newConfig.Global.MaxConcurrentSyncs, d.logger)
-	d.scheduler = NewScheduler(d.logger, d.historyManager)
+	
+	// Update notification manager with new config
+	d.notificationManager = notification.NewNotificationManager(
+		newConfig.Global.EnableNotifications,
+		newConfig.Global.NotificationTimeout,
+		d.logger,
+	)
+	
+	d.scheduler = NewScheduler(d.logger, d.historyManager, d.notificationManager)
 
 	// Start with new configuration
 	enabledRepos := make([]config.RepoConfig, 0)

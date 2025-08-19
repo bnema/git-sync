@@ -27,6 +27,10 @@ type GlobalConfig struct {
 	HistoryRetentionDays int    `toml:"history_retention_days"`
 	HistoryCacheDir      string `toml:"history_cache_dir"`
 	HistoryMaxFileSizeMB int    `toml:"history_max_file_size_mb"`
+	
+	// Notification configuration
+	EnableNotifications bool `toml:"enable_notifications"`
+	NotificationTimeout int  `toml:"notification_timeout"`
 }
 
 type RepoConfig struct {
@@ -77,6 +81,8 @@ func LoadConfig(configPath string) (*Config, error) {
 	v.SetDefault("global.log_level", "info")
 	v.SetDefault("global.default_interval", 300)
 	v.SetDefault("global.max_concurrent_syncs", 5)
+	v.SetDefault("global.enable_notifications", true)
+	v.SetDefault("global.notification_timeout", 5000)
 
 	if err := v.ReadInConfig(); err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
@@ -87,7 +93,44 @@ func LoadConfig(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 
+	// Apply defaults for any missing fields (backwards compatibility)
+	applyDefaults(&config)
+
 	return &config, nil
+}
+
+// applyDefaults ensures that any missing configuration values get their default values
+// This is important for backwards compatibility when new config fields are added
+func applyDefaults(config *Config) {
+	// Apply global defaults
+	if config.Global.LogLevel == "" {
+		config.Global.LogLevel = "info"
+	}
+	if config.Global.DefaultInterval == 0 {
+		config.Global.DefaultInterval = 300
+	}
+	if config.Global.MaxConcurrentSyncs == 0 {
+		config.Global.MaxConcurrentSyncs = 5
+	}
+	
+	// History defaults
+	if config.Global.HistoryMaxEntries == 0 {
+		config.Global.HistoryMaxEntries = 1000
+	}
+	if config.Global.HistoryRetentionDays == 0 {
+		config.Global.HistoryRetentionDays = 30
+	}
+	if config.Global.HistoryMaxFileSizeMB == 0 {
+		config.Global.HistoryMaxFileSizeMB = 10
+	}
+	
+	// Notification defaults - backwards compatibility
+	if config.Global.NotificationTimeout == 0 {
+		config.Global.NotificationTimeout = 5000
+	}
+	
+	// Note: EnableNotifications defaults are handled by Viper's SetDefault
+	// No special logic needed here since Viper handles the true/false correctly
 }
 
 func SaveConfig(config *Config, configPath string) error {
@@ -152,6 +195,11 @@ func mergeGlobalConfig(v *viper.Viper, global GlobalConfig) {
 	if global.HistoryMaxFileSizeMB > 0 {
 		v.Set("global.history_max_file_size_mb", global.HistoryMaxFileSizeMB)
 	}
+	// Notification settings
+	v.Set("global.enable_notifications", global.EnableNotifications)
+	if global.NotificationTimeout > 0 {
+		v.Set("global.notification_timeout", global.NotificationTimeout)
+	}
 }
 
 func AddRepository(repoConfig RepoConfig, configPath string) error {
@@ -203,6 +251,10 @@ func createDefaultConfig(configPath string) error {
 			HistoryRetentionDays: 30,
 			HistoryCacheDir:      "", // Will use default ~/.cache/git-sync
 			HistoryMaxFileSizeMB: 10,
+			
+			// Notification defaults
+			EnableNotifications: true,
+			NotificationTimeout: 5000,
 		},
 		Repositories: []RepoConfig{},
 	}
@@ -234,6 +286,8 @@ func NewConfigWatcher(configPath string, onChange func(*Config) error, logger *s
 	v.SetDefault("global.log_level", "info")
 	v.SetDefault("global.default_interval", 300)
 	v.SetDefault("global.max_concurrent_syncs", 5)
+	v.SetDefault("global.enable_notifications", true)
+	v.SetDefault("global.notification_timeout", 5000)
 
 	if err := v.ReadInConfig(); err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)

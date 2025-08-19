@@ -13,6 +13,7 @@ A robust, production-ready Go application that provides automated synchronizatio
 - **Concurrent Operations**: Configurable concurrent sync limits for performance
 - **Safety First**: Comprehensive safety checks and uncommitted change detection
 - **Systemd Integration**: Full systemd user service support with auto-start
+- **Desktop Notifications**: Real-time sync notifications via notify-send (Linux)
 - **Status Monitoring**: Real-time status reporting and logging
 - **Secure**: Uses existing SSH keys and Git credentials, no credential storage
 
@@ -61,6 +62,8 @@ Configuration is stored in `~/.config/git-sync/config.toml`:
 log_level = "info"
 default_interval = 300      # 5 minutes
 max_concurrent_syncs = 5
+enable_notifications = true # Desktop notifications (Linux only)
+notification_timeout = 5000 # Notification timeout in milliseconds
 
 [[repositories]]
 path = "/home/user/projects/my-app"
@@ -184,6 +187,20 @@ Flags:
   --uninstall         Uninstall the systemd service
 ```
 
+### `git sync notifications`
+Configure desktop notifications for sync events.
+
+```bash
+git sync notifications [enable|disable|status]
+
+Examples:
+  git sync notifications enable   # Enable desktop notifications
+  git sync notifications disable  # Disable desktop notifications  
+  git sync notifications status   # Show current notification settings
+```
+
+**Note**: Desktop notifications require `notify-send` (available on most Linux distributions). Notifications show sync success/failure with repository name, direction, duration, and error details.
+
 ## Advanced Usage
 
 ### Multiple Repository Setup
@@ -229,6 +246,29 @@ vim ~/.config/git-sync/config.toml
 systemctl --user reload git-sync-daemon.service
 ```
 
+### Desktop Notifications
+
+Git Sync provides desktop notifications for sync events on Linux systems:
+
+```bash
+# Enable notifications
+git sync notifications enable
+
+# Check current status
+git sync notifications status
+
+# Disable notifications
+git sync notifications disable
+```
+
+**Notification Types:**
+- **Success**: ✓ Git Sync: repo-name (with sync direction and duration)
+- **Failure**: ✗ Git Sync Failed: repo-name (with error details)
+
+**Requirements:**
+- Linux desktop environment with `notify-send` (libnotify)
+- Enabled in configuration (default: enabled for new installations)
+
 ## Safety Features
 
 - **Uncommitted Change Detection**: Prevents branch switching with dirty working tree
@@ -256,6 +296,7 @@ git-sync/
 │   │   ├── git_operations.go # Native Git operations (go-git)
 │   │   ├── sync.go          # Sync management
 │   │   └── scheduler.go     # Timing and scheduling
+│   ├── notification/        # Desktop notification system
 │   └── systemd/             # Systemd integration
 ```
 

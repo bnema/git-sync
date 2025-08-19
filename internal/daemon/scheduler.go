@@ -7,24 +7,27 @@ import (
 	"time"
 
 	"github.com/bnema/git-sync/internal/config"
+	"github.com/bnema/git-sync/internal/notification"
 )
 
 type Scheduler struct {
-	timers         map[string]*time.Timer
-	tickers        map[string]*time.Ticker
-	mutex          sync.RWMutex
-	logger         *slog.Logger
-	wg             sync.WaitGroup
-	historyManager *HistoryManager
-	ctx            context.Context
+	timers              map[string]*time.Timer
+	tickers             map[string]*time.Ticker
+	mutex               sync.RWMutex
+	logger              *slog.Logger
+	wg                  sync.WaitGroup
+	historyManager      *HistoryManager
+	notificationManager *notification.NotificationManager
+	ctx                 context.Context
 }
 
-func NewScheduler(logger *slog.Logger, historyManager *HistoryManager) *Scheduler {
+func NewScheduler(logger *slog.Logger, historyManager *HistoryManager, notificationManager *notification.NotificationManager) *Scheduler {
 	return &Scheduler{
-		timers:         make(map[string]*time.Timer),
-		tickers:        make(map[string]*time.Ticker),
-		logger:         logger,
-		historyManager: historyManager,
+		timers:              make(map[string]*time.Timer),
+		tickers:             make(map[string]*time.Ticker),
+		logger:              logger,
+		historyManager:      historyManager,
+		notificationManager: notificationManager,
 	}
 }
 
@@ -137,15 +140,22 @@ func (s *Scheduler) performSync(repo config.RepoConfig, sm *SyncManager) {
 	err := sm.SyncRepository(repo)
 	duration := time.Since(start)
 
+	// Determine status and error message
+	status := "success"
+	errorMsg := ""
+	if err != nil {
+		status = "failed"
+		errorMsg = err.Error()
+	}
+
 	// Record in history if history manager is available
 	if s.historyManager != nil {
-		status := "success"
-		errorMsg := ""
-		if err != nil {
-			status = "failed"
-			errorMsg = err.Error()
-		}
 		s.historyManager.RecordSync(repo.Path, repo.Direction, status, duration, errorMsg)
+	}
+
+	// Send notification if notification manager is available
+	if s.notificationManager != nil {
+		s.notificationManager.SendSyncNotification(repo.Path, repo.Direction, status, duration, errorMsg)
 	}
 
 	if err != nil {
