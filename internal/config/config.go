@@ -56,12 +56,10 @@ type ConfigWatcher struct {
 func LoadConfig(configPath string) (*Config, error) {
 	v := viper.New()
 	
-	if configPath == "" {
-		var err error
-		configPath, err = getDefaultConfigPath()
-		if err != nil {
-			return nil, fmt.Errorf("failed to get default config path: %w", err)
-		}
+	var err error
+	configPath, err = GetConfigPath(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get config path: %w", err)
 	}
 
 	// Create default config if it doesn't exist
@@ -95,12 +93,10 @@ func LoadConfig(configPath string) (*Config, error) {
 func SaveConfig(config *Config, configPath string) error {
 	v := viper.New()
 	
-	if configPath == "" {
-		var err error
-		configPath, err = getDefaultConfigPath()
-		if err != nil {
-			return fmt.Errorf("failed to get default config path: %w", err)
-		}
+	var err error
+	configPath, err = GetConfigPath(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to get config path: %w", err)
 	}
 
 	// Ensure config directory exists
@@ -150,6 +146,15 @@ func getDefaultConfigPath() (string, error) {
 		return "", err
 	}
 	return filepath.Join(home, ".config", "git-sync", "config.toml"), nil
+}
+
+// GetConfigPath returns the config file path, using the provided path if not empty,
+// otherwise returning the default config path
+func GetConfigPath(configFile string) (string, error) {
+	if configFile != "" {
+		return configFile, nil
+	}
+	return getDefaultConfigPath()
 }
 
 func createDefaultConfig(configPath string) error {

@@ -19,6 +19,8 @@ Git repositories through a centralized daemon service.
 Examples:
   git sync init                    # Initialize current repo for sync
   git sync status                  # Show sync status
+  git sync edit                    # Edit configuration file
+  git sync history                 # Show synchronization history
   git sync daemon                  # Run daemon (usually via systemd)
   git sync install-daemon          # Install systemd service`,
 	Version: "1.0.0",
@@ -37,6 +39,7 @@ func init() {
 	// Add subcommands
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(statusCmd)
+	rootCmd.AddCommand(editCmd)
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(installDaemonCmd)
 	rootCmd.AddCommand(historyCmd)
