@@ -113,7 +113,11 @@ func (hm *HistoryManager) appendEntry(entry SyncHistoryEntry) error {
 	if err != nil {
 		return fmt.Errorf("failed to open history file: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			fmt.Printf("Warning: failed to close history file: %v\n", err)
+		}
+	}()
 
 	// Write JSON line
 	jsonData, err := json.Marshal(entry)
@@ -151,7 +155,11 @@ func (hm *HistoryManager) GetHistory(limit int, repoFilter string, failedOnly bo
 		}
 		return nil, fmt.Errorf("failed to open history file: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			fmt.Printf("Warning: failed to close history file: %v\n", err)
+		}
+	}()
 
 	var entries []SyncHistoryEntry
 	scanner := bufio.NewScanner(file)
@@ -270,7 +278,11 @@ func (hm *HistoryManager) getAllEntries() ([]SyncHistoryEntry, error) {
 		}
 		return nil, err
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			fmt.Printf("Warning: failed to close history file: %v\n", err)
+		}
+	}()
 
 	var entries []SyncHistoryEntry
 	scanner := bufio.NewScanner(file)
@@ -313,26 +325,38 @@ func (hm *HistoryManager) rewriteHistoryFile(entries []SyncHistoryEntry) error {
 	for _, entry := range entries {
 		jsonData, err := json.Marshal(entry)
 		if err != nil {
-			file.Close()
-			os.Remove(tempFile)
+			if err := file.Close(); err != nil {
+				fmt.Printf("Warning: failed to close temp file: %v\n", err)
+			}
+			if err := os.Remove(tempFile); err != nil {
+				fmt.Printf("Warning: failed to remove temp file: %v\n", err)
+			}
 			return fmt.Errorf("failed to marshal entry: %w", err)
 		}
 
 		if _, err := file.Write(append(jsonData, '\n')); err != nil {
-			file.Close()
-			os.Remove(tempFile)
+			if err := file.Close(); err != nil {
+				fmt.Printf("Warning: failed to close temp file: %v\n", err)
+			}
+			if err := os.Remove(tempFile); err != nil {
+				fmt.Printf("Warning: failed to remove temp file: %v\n", err)
+			}
 			return fmt.Errorf("failed to write entry: %w", err)
 		}
 	}
 
 	if err := file.Close(); err != nil {
-		os.Remove(tempFile)
+		if err := os.Remove(tempFile); err != nil {
+			fmt.Printf("Warning: failed to remove temp file: %v\n", err)
+		}
 		return fmt.Errorf("failed to close temp file: %w", err)
 	}
 
 	// Atomic rename
 	if err := os.Rename(tempFile, hm.historyFile); err != nil {
-		os.Remove(tempFile)
+		if err := os.Remove(tempFile); err != nil {
+			fmt.Printf("Warning: failed to remove temp file: %v\n", err)
+		}
 		return fmt.Errorf("failed to rename temp file: %w", err)
 	}
 
@@ -347,7 +371,9 @@ func (hm *HistoryManager) acquireLock() (*os.File, error) {
 	}
 
 	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
-		lockFile.Close()
+		if err := lockFile.Close(); err != nil {
+			fmt.Printf("Warning: failed to close lock file: %v\n", err)
+		}
 		return nil, err
 	}
 
@@ -356,6 +382,10 @@ func (hm *HistoryManager) acquireLock() (*os.File, error) {
 
 // releaseLock releases the file lock
 func (hm *HistoryManager) releaseLock(lockFile *os.File) {
-	syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
-	lockFile.Close()
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN); err != nil {
+		fmt.Printf("Warning: failed to unlock file: %v\n", err)
+	}
+	if err := lockFile.Close(); err != nil {
+		fmt.Printf("Warning: failed to close lock file: %v\n", err)
+	}
 }

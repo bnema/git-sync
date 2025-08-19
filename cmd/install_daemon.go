@@ -51,7 +51,10 @@ func installDaemon() error {
 		fmt.Print("Do you want to overwrite the existing installation? (y/N): ")
 		
 		var response string
-		fmt.Scanln(&response)
+		if _, err := fmt.Scanln(&response); err != nil {
+			fmt.Printf("Error reading input: %v\n", err)
+			return err
+		}
 		
 		if strings.ToLower(response) != "y" && strings.ToLower(response) != "yes" {
 			fmt.Println("Installation cancelled.")
