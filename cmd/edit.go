@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 
 	"github.com/bnema/git-sync/internal/config"
 	"github.com/spf13/cobra"
@@ -36,33 +35,10 @@ func editConfig() error {
 		return fmt.Errorf("EDITOR environment variable not set")
 	}
 
-	// Ensure config directory exists
-	configDir := filepath.Dir(configPath)
-	if err := os.MkdirAll(configDir, 0755); err != nil {
-		return fmt.Errorf("failed to create config directory: %w", err)
-	}
-
-	// Create config file if it doesn't exist (create a basic empty config)
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		basicConfig := `[global]
-log_level = "info"
-default_interval = 300
-max_concurrent_syncs = 5
-history_max_entries = 1000
-history_retention_days = 30
-history_cache_dir = ""
-history_max_file_size_mb = 10
-
-[[repositories]]
-# Add your repositories here
-# path = "/path/to/your/repo"
-# remote_name = "origin"
-# interval = 300
-# enabled = true
-`
-		if err := os.WriteFile(configPath, []byte(basicConfig), 0644); err != nil {
-			return fmt.Errorf("failed to create default config: %w", err)
-		}
+	// Ensure config exists with all defaults - this will create it if missing
+	// or validate/migrate it if it exists
+	if _, err := config.LoadConfig(configPath); err != nil {
+		return fmt.Errorf("failed to initialize config: %w", err)
 	}
 
 	// Execute editor command
