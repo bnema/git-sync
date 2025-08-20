@@ -136,8 +136,9 @@ func (s *Scheduler) scheduleRepo(ctx context.Context, repo config.RepoConfig, sm
 func (s *Scheduler) performSync(repo config.RepoConfig, sm *SyncManager) {
 	s.logger.Debug("Performing scheduled sync", "repo", repo.Path)
 
+	// Use the scheduler's context for the sync operation
 	start := time.Now()
-	err := sm.SyncRepository(repo)
+	err := sm.SyncRepository(s.ctx, repo)
 	duration := time.Since(start)
 
 	// Determine status and error message

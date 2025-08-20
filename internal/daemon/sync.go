@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"log/slog"
 
 	"github.com/bnema/git-sync/internal/config"
@@ -22,11 +23,11 @@ func NewSyncManager(maxConcurrent int, logger *slog.Logger) *SyncManager {
 	}
 }
 
-func (sm *SyncManager) SyncRepository(repo config.RepoConfig) error {
+func (sm *SyncManager) SyncRepository(ctx context.Context, repo config.RepoConfig) error {
 	// Acquire semaphore to limit concurrent operations
 	sm.semaphore <- struct{}{}
 	defer func() { <-sm.semaphore }()
 
 	// Delegate to GitOperations which handles all the complexity
-	return sm.gitOps.SyncRepository(repo)
+	return sm.gitOps.SyncRepository(ctx, repo)
 }

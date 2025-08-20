@@ -149,7 +149,23 @@ func (d *Daemon) Run() error {
 				}
 			case syscall.SIGINT, syscall.SIGTERM:
 				d.logger.Info("Received shutdown signal", "signal", sig)
-				return d.shutdown()
+				
+				// Create a channel for shutdown completion
+				shutdownComplete := make(chan error, 1)
+				
+				// Start shutdown in a goroutine
+				go func() {
+					shutdownComplete <- d.shutdown()
+				}()
+				
+				// Wait for shutdown with timeout
+				select {
+				case err := <-shutdownComplete:
+					return err
+				case <-time.After(10 * time.Second):
+					d.logger.Error("Shutdown timeout exceeded, forcing exit")
+					return fmt.Errorf("shutdown timeout exceeded")
+				}
 			}
 		case <-d.ctx.Done():
 			d.logger.Info("Context cancelled")
@@ -251,10 +267,7 @@ func (d *Daemon) shutdown() error {
 	// Cancel context to stop all operations
 	d.cancel()
 
-	// Give goroutines a moment to process the context cancellation
-	time.Sleep(100 * time.Millisecond)
-
-	// Stop scheduler
+	// Stop scheduler (with timeout handling built-in)
 	d.scheduler.Stop()
 
 	d.logger.Info("Git sync daemon stopped")

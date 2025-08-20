@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -24,11 +25,18 @@ func NewGitOperations(logger *slog.Logger) *GitOperations {
 }
 
 // SyncRepository performs the sync operation using go-git library
-func (g *GitOperations) SyncRepository(repo configPkg.RepoConfig) error {
+func (g *GitOperations) SyncRepository(ctx context.Context, repo configPkg.RepoConfig) error {
 	g.logger.Info("Starting sync with go-git", 
 		"repo", filepath.Base(repo.Path), 
 		"path", repo.Path,
 		"direction", repo.Direction)
+
+	// Check context before starting
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
 
 	// Open repository
 	r, err := git.PlainOpen(repo.Path)
@@ -44,7 +52,7 @@ func (g *GitOperations) SyncRepository(repo configPkg.RepoConfig) error {
 
 	// Safety checks
 	if repo.SafetyChecks {
-		if err := g.performSafetyChecks(r, worktree, repo); err != nil {
+		if err := g.performSafetyChecks(ctx, r, worktree, repo); err != nil {
 			return err
 		}
 	}
@@ -52,20 +60,27 @@ func (g *GitOperations) SyncRepository(repo configPkg.RepoConfig) error {
 	// Execute sync based on direction
 	switch repo.Direction {
 	case "push":
-		return g.gitPush(r, repo)
+		return g.gitPush(ctx, r, repo)
 	case "pull":
-		return g.gitPull(r, worktree, repo)
+		return g.gitPull(ctx, r, worktree, repo)
 	case "both":
-		if err := g.gitPull(r, worktree, repo); err != nil {
+		if err := g.gitPull(ctx, r, worktree, repo); err != nil {
 			return fmt.Errorf("pull failed: %w", err)
 		}
-		return g.gitPush(r, repo)
+		return g.gitPush(ctx, r, repo)
 	default:
 		return fmt.Errorf("invalid direction: %s", repo.Direction)
 	}
 }
 
-func (g *GitOperations) performSafetyChecks(r *git.Repository, w *git.Worktree, repo configPkg.RepoConfig) error {
+func (g *GitOperations) performSafetyChecks(ctx context.Context, r *git.Repository, w *git.Worktree, repo configPkg.RepoConfig) error {
+	// Check context before starting
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
 	// Check if there are uncommitted changes
 	status, err := w.Status()
 	if err != nil {
@@ -79,10 +94,17 @@ func (g *GitOperations) performSafetyChecks(r *git.Repository, w *git.Worktree, 
 	return nil
 }
 
-func (g *GitOperations) gitPush(r *git.Repository, repo configPkg.RepoConfig) error {
+func (g *GitOperations) gitPush(ctx context.Context, r *git.Repository, repo configPkg.RepoConfig) error {
+	// Check context before starting
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
 	// Handle specific branch strategy
 	if repo.BranchStrategy == "specific" {
-		return g.gitPushSpecificBranch(r, repo)
+		return g.gitPushSpecificBranch(ctx, r, repo)
 	}
 
 	pushOptions := &git.PushOptions{
@@ -118,10 +140,17 @@ func (g *GitOperations) gitPush(r *git.Repository, repo configPkg.RepoConfig) er
 	return nil
 }
 
-func (g *GitOperations) gitPull(r *git.Repository, w *git.Worktree, repo configPkg.RepoConfig) error {
+func (g *GitOperations) gitPull(ctx context.Context, r *git.Repository, w *git.Worktree, repo configPkg.RepoConfig) error {
+	// Check context before starting
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
 	// Handle specific branch strategy
 	if repo.BranchStrategy == "specific" {
-		return g.gitPullSpecificBranch(r, w, repo)
+		return g.gitPullSpecificBranch(ctx, r, w, repo)
 	}
 
 	pullOptions := &git.PullOptions{
@@ -131,7 +160,7 @@ func (g *GitOperations) gitPull(r *git.Repository, w *git.Worktree, repo configP
 
 	// For "all" strategy, we do a fetch instead
 	if repo.BranchStrategy == "all" {
-		return g.gitFetch(r, repo)
+		return g.gitFetch(ctx, r, repo)
 	}
 
 	err := w.Pull(pullOptions)
@@ -154,7 +183,14 @@ func (g *GitOperations) gitPull(r *git.Repository, w *git.Worktree, repo configP
 	return nil
 }
 
-func (g *GitOperations) gitFetch(r *git.Repository, repo configPkg.RepoConfig) error {
+func (g *GitOperations) gitFetch(ctx context.Context, r *git.Repository, repo configPkg.RepoConfig) error {
+	// Check context before starting
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
 	fetchOptions := &git.FetchOptions{
 		RemoteName: repo.Remote,
 		Progress:   nil,
@@ -173,8 +209,15 @@ func (g *GitOperations) gitFetch(r *git.Repository, repo configPkg.RepoConfig) e
 	return nil
 }
 
-func (g *GitOperations) gitPushSpecificBranch(r *git.Repository, repo configPkg.RepoConfig) error {
-	return g.withBranchSwitch(r, repo, func() error {
+func (g *GitOperations) gitPushSpecificBranch(ctx context.Context, r *git.Repository, repo configPkg.RepoConfig) error {
+	return g.withBranchSwitch(ctx, r, repo, func() error {
+		// Check context before push operation
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		pushOptions := &git.PushOptions{
 			RemoteName: repo.Remote,
 			Progress:   nil,
@@ -207,8 +250,15 @@ func (g *GitOperations) gitPushSpecificBranch(r *git.Repository, repo configPkg.
 	})
 }
 
-func (g *GitOperations) gitPullSpecificBranch(r *git.Repository, w *git.Worktree, repo configPkg.RepoConfig) error {
-	return g.withBranchSwitch(r, repo, func() error {
+func (g *GitOperations) gitPullSpecificBranch(ctx context.Context, r *git.Repository, w *git.Worktree, repo configPkg.RepoConfig) error {
+	return g.withBranchSwitch(ctx, r, repo, func() error {
+		// Check context before pull operation
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		pullOptions := &git.PullOptions{
 			RemoteName: repo.Remote,
 			Progress:   nil,
@@ -232,7 +282,14 @@ func (g *GitOperations) gitPullSpecificBranch(r *git.Repository, w *git.Worktree
 }
 
 // withBranchSwitch executes a function after switching to the target branch
-func (g *GitOperations) withBranchSwitch(r *git.Repository, repo configPkg.RepoConfig, operation func() error) error {
+func (g *GitOperations) withBranchSwitch(ctx context.Context, r *git.Repository, repo configPkg.RepoConfig, operation func() error) error {
+	// Check context before starting
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
 	w, err := r.Worktree()
 	if err != nil {
 		return fmt.Errorf("failed to get worktree: %w", err)
@@ -264,6 +321,13 @@ func (g *GitOperations) withBranchSwitch(r *git.Repository, repo configPkg.RepoC
 
 	if !status.IsClean() {
 		return fmt.Errorf("cannot switch branches due to uncommitted changes")
+	}
+
+	// Check context before checkout
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
 	}
 
 	// Try to checkout the target branch
