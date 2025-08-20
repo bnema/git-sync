@@ -299,7 +299,7 @@ func NewConfigWatcher(configPath string, onChange func(*Config) error, logger *s
 		}
 	}
 
-	// Load initial config
+	// Load initial config using our validation system
 	initialConfig, err := LoadConfig(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load initial config: %w", err)
@@ -309,12 +309,8 @@ func NewConfigWatcher(configPath string, onChange func(*Config) error, logger *s
 	v.SetConfigFile(configPath)
 	v.SetConfigType("toml")
 	
-	// Set defaults
-	v.SetDefault("global.log_level", "info")
-	v.SetDefault("global.default_interval", 300)
-	v.SetDefault("global.max_concurrent_syncs", 5)
-	v.SetDefault("global.enable_notifications", true)
-	v.SetDefault("global.notification_timeout", 5000)
+	// Use our centralized defaults system
+	setAllDefaults(v)
 
 	if err := v.ReadInConfig(); err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
