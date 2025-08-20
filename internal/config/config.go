@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/viper"
 )
 
@@ -66,71 +67,90 @@ func LoadConfig(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("failed to get config path: %w", err)
 	}
 
-	// Create default config if it doesn't exist
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		if err := createDefaultConfig(configPath); err != nil {
-			return nil, fmt.Errorf("failed to create default config: %w", err)
-		}
-	}
-
 	// Configure Viper
 	v.SetConfigFile(configPath)
 	v.SetConfigType("toml")
 	
-	// Set defaults
-	v.SetDefault("global.log_level", "info")
-	v.SetDefault("global.default_interval", 300)
-	v.SetDefault("global.max_concurrent_syncs", 5)
-	v.SetDefault("global.enable_notifications", true)
-	v.SetDefault("global.notification_timeout", 5000)
+	// Set all defaults - Viper uses these only if keys don't exist in config
+	setAllDefaults(v)
 
-	if err := v.ReadInConfig(); err != nil {
-		return nil, fmt.Errorf("failed to read config file: %w", err)
+	// Read existing config if it exists
+	configExists := false
+	if _, err := os.Stat(configPath); err == nil {
+		if err := v.ReadInConfig(); err != nil {
+			return nil, fmt.Errorf("failed to read config file: %w", err)
+		}
+		configExists = true
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("failed to check config file: %w", err)
 	}
 
+	// Unmarshal into our config struct
 	var config Config
 	if err := v.Unmarshal(&config); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 
-	// Apply defaults for any missing fields (backwards compatibility)
-	applyDefaults(&config)
+	// If config file exists, write it back to ensure all new defaults are included
+	// This is idempotent - WriteConfig only updates if there are changes
+	if configExists {
+		if err := v.WriteConfig(); err != nil {
+			// If write fails, it's not critical - the config is still loaded correctly
+			// This just means the file won't get the new defaults written to disk
+		}
+	} else {
+		// Create default config file
+		if err := createDefaultConfig(configPath); err != nil {
+			return nil, fmt.Errorf("failed to create default config: %w", err)
+		}
+	}
 
 	return &config, nil
 }
 
 // applyDefaults ensures that any missing configuration values get their default values
 // This is important for backwards compatibility when new config fields are added
+// applyDefaults is deprecated - use setAllDefaults with Viper instead
+// This function is kept for backward compatibility but is no longer used
+// TODO: Remove this function in a future version
 func applyDefaults(config *Config) {
-	// Apply global defaults
-	if config.Global.LogLevel == "" {
-		config.Global.LogLevel = "info"
-	}
-	if config.Global.DefaultInterval == 0 {
-		config.Global.DefaultInterval = 300
-	}
-	if config.Global.MaxConcurrentSyncs == 0 {
-		config.Global.MaxConcurrentSyncs = 5
-	}
+	// This function is no longer used as we now use Viper's SetDefault
+	// which handles defaults automatically and more efficiently
+}
+
+// setAllDefaults sets all default configuration values in Viper
+// This is the single source of truth for all default values
+func setAllDefaults(v *viper.Viper) {
+	// Global defaults
+	v.SetDefault("global.log_level", "info")
+	v.SetDefault("global.default_interval", 300)
+	v.SetDefault("global.max_concurrent_syncs", 5)
 	
 	// History defaults
-	if config.Global.HistoryMaxEntries == 0 {
-		config.Global.HistoryMaxEntries = 1000
-	}
-	if config.Global.HistoryRetentionDays == 0 {
-		config.Global.HistoryRetentionDays = 30
-	}
-	if config.Global.HistoryMaxFileSizeMB == 0 {
-		config.Global.HistoryMaxFileSizeMB = 10
+	v.SetDefault("global.history_max_entries", 1000)
+	v.SetDefault("global.history_retention_days", 30)
+	v.SetDefault("global.history_cache_dir", "")
+	v.SetDefault("global.history_max_file_size_mb", 10)
+	
+	// Notification defaults
+	v.SetDefault("global.enable_notifications", true)
+	v.SetDefault("global.notification_timeout", 5000)
+}
+
+// structToMap converts a config struct to a map for Viper operations
+func structToMap(config *Config) map[string]interface{} {
+	data, err := toml.Marshal(config)
+	if err != nil {
+		return nil
 	}
 	
-	// Notification defaults - backwards compatibility
-	if config.Global.NotificationTimeout == 0 {
-		config.Global.NotificationTimeout = 5000
+	var m map[string]interface{}
+	err = toml.Unmarshal(data, &m)
+	if err != nil {
+		return nil
 	}
 	
-	// Note: EnableNotifications defaults are handled by Viper's SetDefault
-	// No special logic needed here since Viper handles the true/false correctly
+	return m
 }
 
 func SaveConfig(config *Config, configPath string) error {
@@ -148,23 +168,32 @@ func SaveConfig(config *Config, configPath string) error {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	// Configure Viper for writing
+	// Configure Viper
 	v.SetConfigFile(configPath)
 	v.SetConfigType("toml")
 	
-	// Read existing config first if it exists
+	// Set all defaults first
+	setAllDefaults(v)
+	
+	// Read existing config if it exists to preserve any extra fields
 	if _, err := os.Stat(configPath); err == nil {
 		if err := v.ReadInConfig(); err != nil {
 			return fmt.Errorf("failed to read existing config: %w", err)
 		}
 	}
 	
-	// Merge config values intelligently - only set non-zero values
-	mergeGlobalConfig(v, config.Global)
+	// Convert our config struct to map
+	configMap := structToMap(config)
+	if configMap == nil {
+		return fmt.Errorf("failed to convert config to map")
+	}
 	
-	// Always set repositories array (this is expected to be complete)
-	v.Set("repositories", config.Repositories)
+	// Merge our config into viper (preserves defaults for missing fields)
+	if err := v.MergeConfigMap(configMap); err != nil {
+		return fmt.Errorf("failed to merge config: %w", err)
+	}
 
+	// Write the merged config
 	if err := v.WriteConfig(); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
@@ -240,26 +269,24 @@ func GetConfigPath(configFile string) (string, error) {
 }
 
 func createDefaultConfig(configPath string) error {
-	defaultConfig := &Config{
-		Global: GlobalConfig{
-			LogLevel:           "info",
-			DefaultInterval:    300,
-			MaxConcurrentSyncs: 5,
-			
-			// History defaults
-			HistoryMaxEntries:    1000,
-			HistoryRetentionDays: 30,
-			HistoryCacheDir:      "", // Will use default ~/.cache/git-sync
-			HistoryMaxFileSizeMB: 10,
-			
-			// Notification defaults
-			EnableNotifications: true,
-			NotificationTimeout: 5000,
-		},
-		Repositories: []RepoConfig{},
+	v := viper.New()
+	v.SetConfigFile(configPath)
+	v.SetConfigType("toml")
+	
+	// Use the same defaults system
+	setAllDefaults(v)
+	
+	// Create empty repositories array
+	v.Set("repositories", []RepoConfig{})
+	
+	// Ensure config directory exists
+	configDir := filepath.Dir(configPath)
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
 	}
-
-	return SaveConfig(defaultConfig, configPath)
+	
+	// Write the config with all defaults
+	return v.SafeWriteConfig()
 }
 
 // NewConfigWatcher creates a new ConfigWatcher instance
